@@ -1,0 +1,229 @@
+---
+title: "Data analysis on Alzheimer's Disease"
+author: "Prajwal Markal Puttaswamy"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(dplyr)
+library(ggplot2)
+library(factoextra)
+library(MASS)
+library(cluster)
+library(NbClust)
+```
+
+
+
+```{r}
+# Load the dataset
+data <- read.csv("C:/Users/prajw/OneDrive/Desktop/project/ma335/project data.csv")
+
+# Convert 'M' and 'F' into numeric values
+data$Gender <- ifelse(data$M.F== "M", 1, 0)
+
+data$M.F <- ifelse(data$M.F=="M", "Male", "Female")
+# Remove rows with Group = "Converted"
+data <- data[data$Group != "Converted", ]
+
+# Remove rows with missing values
+data <- na.omit(data)
+data$Group <- as.factor(data$Group)
+
+```
+
+```{r}
+# Select the relevant variables
+selected_data <- data[, c("eTIV", "nWBV", "ASF", "MMSE", "CDR")]
+
+# Calculate the correlation matrix
+correlation_matrix <- cor(selected_data, use = "pairwise.complete.obs")
+
+# View the correlation matrix
+correlation_matrix
+
+```
+
+
+
+
+Individuals with an "MMSE" score less than 18 or a "CDR" score of 1 or higher are categorized as "Dementia."
+Individuals with an "MMSE" score between 18 and 23, and a "CDR" score less than 1, are categorized as "Mild Cognitive Impairment."
+Individuals with an "MMSE" score greater than 23 and a "CDR" score less than 1 are categorized as "Normal."
+
+
+
+```{r}
+# Subset the numerical variables
+numerical_variables <- data[, c("Age", "EDUC", "SES", "MMSE", "CDR", "eTIV", "nWBV", "ASF")]
+
+# Calculate mean and standard deviation for each variable
+variable_means <- apply(numerical_variables, 2, mean)
+variable_sds <- apply(numerical_variables, 2, sd)
+
+# Standardize the variables
+standardized_variables <- scale(numerical_variables)
+
+# Create a new dataframe with the standardized variables
+new_data <- data
+new_data[, c("Age", "EDUC", "SES", "MMSE", "CDR", "eTIV", "nWBV", "ASF")] <- standardized_variables
+
+```
+
+
+```{r}
+
+# Subset the numerical variables
+clusters <- new_data[, c("Age", "EDUC", "SES", "MMSE", "CDR", "eTIV", "nWBV", "ASF")]
+
+# Perform K-Means clustering
+km <- kmeans(clusters, centers = 4, nstart = 50, iter.max = 100)
+
+# Visualize the clustering results
+fviz_cluster(km, data = clusters)
+
+# Display cluster information
+km
+
+```
+
+```{r}
+# Perform logistic regression
+lreg <- glm(Group ~ Age + EDUC + SES + MMSE + CDR + eTIV + nWBV + ASF + Gender, data = data, family = binomial)
+
+
+# Display summary of the logistic regression model
+summary(lreg)
+```
+```{r}
+
+ggplot(data) +
+ aes(x = SES, y = Group, colour = Group) +
+ geom_jitter(size = 1.2) +
+ scale_color_manual(values = c(Demented = "#B313A3", 
+Nondemented = "#1FB890")) +
+labs(x = "Cognitive Status", y = "Socioeconomic Status", title = "Socieconomic Status Vs Cognitive Status")  +
+ coord_flip() +
+ theme_bw() +
+ theme(plot.title = element_text(size = 18L, face = "bold", hjust = 0.5), 
+ axis.title.y = element_text(size = 12L, face = "bold"), axis.title.x = element_text(size = 12L, face = "bold")) +
+ facet_wrap(vars(M.F), scales = "free_x")
+
+
+```
+
+spliting the data for training
+
+```{r}
+
+# Set the seed for reproducibility
+set.seed(132)
+
+# Generate random indices for splitting the data
+indices <- sample(1:nrow(new_data), size = nrow(new_data), replace = FALSE)
+
+# Define the proportion of data to be used for training 
+train_proportion <- 0.7
+
+# Determine the number of samples for training and testing
+train_size <- round(train_proportion * nrow(new_data))
+test_size <- nrow(new_data) - train_size
+
+# Split the data into training and testing sets
+train_data <- new_data[indices[1:train_size], ]
+test_data <- data[indices[(train_size + 1):nrow(data)], ]
+train_data$Group <- as.factor(train_data$Group)
+test_data$Group <- as.factor(test_data$Group)
+
+```
+
+
+
+
+```{r}
+# Fit a logistic regression model on the Train data using the predictors MMSE, eTIV, and nWBV
+lreg1 <- glm(Group ~ MMSE + eTIV + nWBV, data = train_data, family = binomial)
+
+# Perform backward elimination using stepAIC function
+reduced_model <- stepAIC(lreg1, direction = "backward")
+
+# Display summary of the reduced model
+summary(reduced_model)
+
+```
+
+```{r}
+# Predict probabilities of Y=1 (Demented) using the reduced model
+glm.probs <- predict(reduced_model, type = "response")
+
+# Assign predicted classes based on the probability threshold of 0.5
+glm.predicted <- rep("Demented", 222)
+glm.predicted[glm.probs > 0.5] = "Nondemented"
+
+# Create a contingency table of predicted vs. actual classes
+table(glm.predicted, train_data$Group)
+
+# Calculate the accuracy of the predicted classes
+mean(glm.predicted == train_data$Group)
+
+```
+```{r }
+
+ggplot(data) +
+ aes(x = nWBV, fill = M.F) +
+ geom_histogram(bins = 40L) +
+ scale_fill_manual(values = c(Female = "#756BB1", 
+Male = "#BCBDDC")) +
+ labs(x = "Normalize Whole Brain Volume", title = "Distribution of Whole Brain Volume") +
+ ggthemes::theme_igray() +
+ theme(plot.title = element_text(size = 18L, 
+ face = "bold", hjust = 0.5), axis.title.y = element_text(size = 12L, face = "bold"), axis.title.x = element_text(size = 12L, 
+ face = "bold"))
+
+
+```
+
+```{r}
+# Fit a logistic regression model on the test data using the predictors MMSE, eTIV, and nWBV
+lreg2 <- glm(Group ~ MMSE + eTIV + nWBV, data = test_data, family = binomial)
+
+# Perform backward elimination using stepAIC
+reduced_model2 <- stepAIC(lreg2, direction = "backward")
+
+# Print the summary of the reduced model
+summary(reduced_model2)
+```
+
+```{r}
+# Predict the probabilities of the response variable using the reduced_model2
+glm.probs2 <- predict(reduced_model2, type = "response")  # Pr(Y = 1|X)
+
+# Create predicted labels based on the probability threshold of 0.5
+glm.predicted2 <- rep("Demented", 95)
+glm.predicted2[glm.probs2 > 0.5] <- "Nondemented"
+
+# Create a contingency table to compare the predicted labels with the actual Group values in the test_data
+table(glm.predicted2, test_data$Group)
+
+# Calculate the accuracy by comparing the predicted labels with the actual Group values in the test_data
+mean(glm.predicted2 == test_data$Group)
+
+```
+```{r}
+
+ggplot(data) +
+ aes(x = EDUC, y = Group, colour = Group) +
+ geom_boxplot(fill = "#112446") +
+ scale_color_hue(direction = 1) +
+ labs(x = "Education", y = "Cognitive Status", title = "Year of Education VS Cognitive Status") +
+ coord_flip() +
+ theme_minimal() +
+ theme(plot.title = element_text(size = 16L, face = "bold", hjust = 0.5), 
+ axis.title.y = element_text(size = 12L, face = "bold"), axis.title.x = element_text(size = 12L, face = "bold"))
+
+
+```
+
